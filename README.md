@@ -5,13 +5,13 @@
 
 ---
 
-## 👥 Anggota Kelompok 6
+## 👥 Anggota Kelompok 6 (Kelas Kamis Pagi)
 | Nama Mahasiswa | NIM | Peran (*Role*) |
-| :--- | :--- | :--- |
-| **Mahir** | *[NIM]* | Project Coordinator & Gateway Engineer |
-| **Ade** | *[NIM]* | Backend & Microservices Developer |
-| **Irfan** | *[NIM]* | Infrastructure & Docker Engineer |
-| **Ghozi** | *[NIM]* | QA, Documentation & Video Creator |
+| :--- | :---: | :--- |
+| **M. Sulthan Mahir Fadha** | 09020623035 | Project Coordinator & Gateway Engineer |
+| **Ade Erhans Nasution** | 09040623052 | Backend & Microservices Developer |
+| **Irfan Daffayudha** | 09010623006 | Infrastructure & Docker Engineer |
+| **Ahmad Ghozi Darmawan** | 09020623017 | QA, Documentation & Video Creator |
 
 ---
 
