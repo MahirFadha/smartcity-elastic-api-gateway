@@ -1,0 +1,117 @@
+# ==============================================================================
+# JARINGAN TERISOLASI (User-Defined Bridge Network)
+# ==============================================================================
+networks:
+  smartcity-net:
+    driver: bridge
+    name: smartcity-net
+
+# ==============================================================================
+# DEFINISI SERVICES
+# ==============================================================================
+services:
+
+  # ----------------------------------------------------------------------------
+  # 1. API GATEWAY: Kong Gateway (DB-less Mode)
+  # ----------------------------------------------------------------------------
+  api-gateway:
+    image: kong:3.4
+    container_name: smartcity-gateway
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/declarative/kong.yml
+      KONG_NGINX_WORKER_PROCESSES: "1"
+      KONG_MEM_CACHE_SIZE: "32m"
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+      KONG_PROXY_LISTEN: 0.0.0.0:8000
+    volumes:
+      - ./gateway/kong.yml:/kong/declarative/kong.yml:ro
+    ports:
+      - "80:8000"       # Ingress Publik (Port 80)
+      - "8001:8001"     # Kong Admin API / Diagnostics
+    networks:
+      - smartcity-net
+    depends_on:
+      - redis
+      - service-kependudukan
+      - service-pajak
+    # Batasan Sumber Daya Sesuai Ketentuan Dosen (3 SKS)
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    cpus: 0.25
+    mem_limit: 256m
+    restart: on-failure
+
+  # ----------------------------------------------------------------------------
+  # 2. STATE STORAGE: Redis (In-Memory Quota & Rate Limit Store)
+  # ----------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: smartcity-redis
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    networks:
+      - smartcity-net
+    # Port 6379 TIDAK dipublish ke publik (Hanya internal smartcity-net)
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    cpus: 0.25
+    mem_limit: 256m
+    restart: on-failure
+
+  # ----------------------------------------------------------------------------
+  # 3. MICROSERVICE: Service Kependudukan (Mock API - Delay 50ms)
+  # ----------------------------------------------------------------------------
+  service-kependudukan:
+    build:
+      context: ./services/kependudukan
+      dockerfile: Dockerfile
+    container_name: service-kependudukan
+    environment:
+      - PORT=3000
+      - SERVICE_NAME=Service Kependudukan
+      - ARTIFICIAL_DELAY_MS=50
+    networks:
+      - smartcity-net
+    # Port 3000 TIDAK dipublish ke publik (Hanya diakses melalui API Gateway)
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    cpus: 0.25
+    mem_limit: 256m
+    restart: on-failure
+
+  # ----------------------------------------------------------------------------
+  # 4. MICROSERVICE: Service Pajak (Mock API - Delay 100ms)
+  # ----------------------------------------------------------------------------
+  service-pajak:
+    build:
+      context: ./services/pajak
+      dockerfile: Dockerfile
+    container_name: service-pajak
+    environment:
+      - PORT=3000
+      - SERVICE_NAME=Service Pajak
+      - ARTIFICIAL_DELAY_MS=100
+    networks:
+      - smartcity-net
+    # Port 3000 TIDAK dipublish ke publik (Hanya diakses melalui API Gateway)
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    cpus: 0.25
+    mem_limit: 256m
+    restart: on-failure

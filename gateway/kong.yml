@@ -1,0 +1,107 @@
+_format_version: "3.0"
+
+# ==============================================================================
+# UPSTREAMS: Health Check & Circuit Breaker Configuration
+# ==============================================================================
+upstreams:
+  - name: kependudukan-upstream
+    healthchecks:
+      active:
+        type: http
+        http_path: /health
+        timeout: 1
+        concurrency: 5
+        healthy:
+          interval: 1
+          successes: 1
+          http_statuses: [200, 302]
+        unhealthy:
+          interval: 1
+          http_failures: 1
+          timeouts: 1
+          http_statuses: [429, 404, 500, 501, 502, 503, 504, 505]
+      passive:
+        type: http
+        healthy:
+          http_statuses: [200, 201, 202, 204]
+          successes: 1
+        unhealthy:
+          http_failures: 1
+          http_statuses: [500, 502, 503, 504]
+          timeouts: 1
+    targets:
+      - target: service-kependudukan:3000
+        weight: 100
+
+  - name: pajak-upstream
+    healthchecks:
+      active:
+        type: http
+        http_path: /health
+        timeout: 1
+        concurrency: 5
+        healthy:
+          interval: 1
+          successes: 1
+          http_statuses: [200, 302]
+        unhealthy:
+          interval: 1
+          http_failures: 1
+          timeouts: 1
+          http_statuses: [429, 404, 500, 501, 502, 503, 504, 505]
+      passive:
+        type: http
+        healthy:
+          http_statuses: [200, 201, 202, 204]
+          successes: 1
+        unhealthy:
+          http_failures: 1
+          http_statuses: [500, 502, 503, 504]
+          timeouts: 1
+    targets:
+      - target: service-pajak:3000
+        weight: 100
+
+# ==============================================================================
+# SERVICES & ROUTES
+# ==============================================================================
+services:
+  # 1. Service Kependudukan
+  - name: kependudukan-service
+    host: kependudukan-upstream
+    port: 3000
+    protocol: http
+    routes:
+      - name: kependudukan-route
+        paths:
+          - /api/v1/kependudukan
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        config:
+          second: 20
+          policy: redis
+          redis_host: redis
+          redis_port: 6379
+          fault_tolerant: true
+          hide_client_headers: false
+
+  # 2. Service Pajak
+  - name: pajak-service
+    host: pajak-upstream
+    port: 3000
+    protocol: http
+    routes:
+      - name: pajak-route
+        paths:
+          - /api/v1/pajak
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        config:
+          second: 20
+          policy: redis
+          redis_host: redis
+          redis_port: 6379
+          fault_tolerant: true
+          hide_client_headers: false
