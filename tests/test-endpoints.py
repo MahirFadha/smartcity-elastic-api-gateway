@@ -1,9 +1,9 @@
 """
 Skrip Pengujian Cepat API Gateway Smart City (Kelompok 6)
 Menguji:
-1. Akses normal ke Service Kependudukan & Service Pajak via Gateway (Port 80)
+1. Akses normal & pembacaan Worker ID (Load Balancing)
 2. Mekanisme Rate Limiting (Memicu HTTP 429 Too Many Requests)
-3. Pembacaan Header X-RateLimit-*
+3. Pembacaan Header X-RateLimit-* dan X-Served-By
 """
 
 import urllib.request
@@ -34,10 +34,11 @@ def test_single_request(path, label):
             latency = (time.time() - start_time) * 1000
             data = json.loads(response.read().decode('utf-8'))
             
-            print(f"[OK] Status Code  : {response.status} OK")
-            print(f"[OK] Total Latency: {latency:.2f} ms")
-            print(f"[OK] Respon Service: {data.get('service')}")
-            print(f"[OK] Delay Buatan : {data.get('artificial_delay_ms')} ms")
+            print(f"[OK] Status Code    : {response.status} OK")
+            print(f"[OK] Total Latency  : {latency:.2f} ms")
+            print(f"[OK] Service Target : {data.get('service')}")
+            print(f"[OK] Node / Worker  : {data.get('worker_id', 'Unknown')}")
+            print(f"[OK] Header Served-By: {response.headers.get('X-Served-By')}")
             
             # Print Rate Limit Headers
             print(f"• X-RateLimit-Limit-Second    : {response.headers.get('X-RateLimit-Limit-Second')}")
@@ -54,6 +55,21 @@ def test_single_request(path, label):
     except Exception as e:
         print(f"[FAIL] Error: {e}")
         return False
+
+def test_load_balancing(path, num_requests=4):
+    url = f"{GATEWAY_BASE}{path}"
+    print(f"\nMenembakkan {num_requests} request berurutan untuk uji Load Balancing Round-Robin:")
+    for i in range(1, num_requests + 1):
+        try:
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                served_by = resp.headers.get('X-Served-By', 'Unknown')
+                data = json.loads(resp.read().decode('utf-8'))
+                worker = data.get('worker_id', 'Unknown')
+                print(f"  Request #{i} -> Dilayani oleh: [{worker}] ({served_by})")
+        except Exception as e:
+            print(f"  Request #{i} -> Gagal: {e}")
+        time.sleep(0.3)
 
 def test_rate_limiting(path, num_requests=35):
     import concurrent.futures
@@ -93,15 +109,18 @@ def test_rate_limiting(path, num_requests=35):
         print("  [OK] Mekanisme Traffic Rate Limiting Kong + Redis BERHASIL TERBUKTI!")
 
 if __name__ == "__main__":
-    print_separator("PENGUJIAN SISTEM API GATEWAY KELOMPOK 6")
-    print("Pastikan 'docker compose up -d' sudah dijalankan sebelum test ini.")
+    print_separator("PENGUJIAN SISTEM API GATEWAY KELOMPOK 6 (HA CLUSTER)")
     
     # 1. Test normal endpoints
     print_separator("1. UJI KONEKTIVITAS NORMAL")
     for path, label in ENDPOINTS:
         test_single_request(path, label)
         time.sleep(1)
+
+    # 2. Test Load Balancing
+    print_separator("2. UJI LOAD BALANCING (ROUND-ROBIN)")
+    test_load_balancing("/api/v1/kependudukan", num_requests=4)
         
-    # 2. Test Rate Limiting
-    print_separator("2. UJI TRAFFIC RATE LIMITING")
+    # 3. Test Rate Limiting
+    print_separator("3. UJI TRAFFIC RATE LIMITING")
     test_rate_limiting("/api/v1/kependudukan", num_requests=35)

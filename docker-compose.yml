@@ -7,12 +7,12 @@ networks:
     name: smartcity-net
 
 # ==============================================================================
-# DEFINISI SERVICES
+# DEFINISI SERVICES (7 CONTAINERS - HIGH AVAILABILITY CLUSTER)
 # ==============================================================================
 services:
 
   # ----------------------------------------------------------------------------
-  # 1. API GATEWAY: Kong Gateway (DB-less Mode)
+  # 1. API GATEWAY: Kong Gateway (DB-less Mode, Port 80)
   # ----------------------------------------------------------------------------
   api-gateway:
     image: kong:3.4
@@ -36,10 +36,11 @@ services:
     networks:
       - smartcity-net
     depends_on:
-      - redis
-      - service-kependudukan
-      - service-pajak
-    # Batasan Sumber Daya Sesuai Ketentuan Dosen (3 SKS)
+      - redis-primary
+      - service-kependudukan-1
+      - service-kependudukan-2
+      - service-pajak-1
+      - service-pajak-2
     deploy:
       resources:
         limits:
@@ -50,15 +51,17 @@ services:
     restart: on-failure
 
   # ----------------------------------------------------------------------------
-  # 2. STATE STORAGE: Redis (In-Memory Quota & Rate Limit Store)
+  # 2. STATE STORAGE: Redis Primary (Master)
   # ----------------------------------------------------------------------------
-  redis:
+  redis-primary:
     image: redis:7-alpine
-    container_name: smartcity-redis
+    container_name: smartcity-redis-primary
     command: ["redis-server", "--appendonly", "no", "--save", ""]
     networks:
-      - smartcity-net
-    # Port 6379 TIDAK dipublish ke publik (Hanya internal smartcity-net)
+      smartcity-net:
+        aliases:
+          - redis
+          - redis-primary
     deploy:
       resources:
         limits:
@@ -69,20 +72,40 @@ services:
     restart: on-failure
 
   # ----------------------------------------------------------------------------
-  # 3. MICROSERVICE: Service Kependudukan (Mock API - Delay 50ms)
+  # 3. STATE STORAGE: Redis Replica (Slave - Continuous Async Replication)
   # ----------------------------------------------------------------------------
-  service-kependudukan:
+  redis-replica:
+    image: redis:7-alpine
+    container_name: smartcity-redis-replica
+    command: ["redis-server", "--replicaof", "redis-primary", "6379", "--appendonly", "no", "--save", ""]
+    networks:
+      - smartcity-net
+    depends_on:
+      - redis-primary
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    cpus: 0.25
+    mem_limit: 256m
+    restart: on-failure
+
+  # ----------------------------------------------------------------------------
+  # 4. MICROSERVICE KEPENDUDUKAN: Worker 1 (Active-Active HA)
+  # ----------------------------------------------------------------------------
+  service-kependudukan-1:
     build:
       context: ./services/kependudukan
       dockerfile: Dockerfile
-    container_name: service-kependudukan
+    container_name: service-kependudukan-1
     environment:
       - PORT=3000
       - SERVICE_NAME=Service Kependudukan
+      - WORKER_ID=Worker 1
       - ARTIFICIAL_DELAY_MS=50
     networks:
       - smartcity-net
-    # Port 3000 TIDAK dipublish ke publik (Hanya diakses melalui API Gateway)
     deploy:
       resources:
         limits:
@@ -93,20 +116,68 @@ services:
     restart: on-failure
 
   # ----------------------------------------------------------------------------
-  # 4. MICROSERVICE: Service Pajak (Mock API - Delay 100ms)
+  # 5. MICROSERVICE KEPENDUDUKAN: Worker 2 (Active-Active HA)
   # ----------------------------------------------------------------------------
-  service-pajak:
+  service-kependudukan-2:
+    build:
+      context: ./services/kependudukan
+      dockerfile: Dockerfile
+    container_name: service-kependudukan-2
+    environment:
+      - PORT=3000
+      - SERVICE_NAME=Service Kependudukan
+      - WORKER_ID=Worker 2
+      - ARTIFICIAL_DELAY_MS=50
+    networks:
+      - smartcity-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    cpus: 0.25
+    mem_limit: 256m
+    restart: on-failure
+
+  # ----------------------------------------------------------------------------
+  # 6. MICROSERVICE PAJAK: Worker 1 (Active-Active HA)
+  # ----------------------------------------------------------------------------
+  service-pajak-1:
     build:
       context: ./services/pajak
       dockerfile: Dockerfile
-    container_name: service-pajak
+    container_name: service-pajak-1
     environment:
       - PORT=3000
       - SERVICE_NAME=Service Pajak
+      - WORKER_ID=Worker 1
       - ARTIFICIAL_DELAY_MS=100
     networks:
       - smartcity-net
-    # Port 3000 TIDAK dipublish ke publik (Hanya diakses melalui API Gateway)
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    cpus: 0.25
+    mem_limit: 256m
+    restart: on-failure
+
+  # ----------------------------------------------------------------------------
+  # 7. MICROSERVICE PAJAK: Worker 2 (Active-Active HA)
+  # ----------------------------------------------------------------------------
+  service-pajak-2:
+    build:
+      context: ./services/pajak
+      dockerfile: Dockerfile
+    container_name: service-pajak-2
+    environment:
+      - PORT=3000
+      - SERVICE_NAME=Service Pajak
+      - WORKER_ID=Worker 2
+      - ARTIFICIAL_DELAY_MS=100
+    networks:
+      - smartcity-net
     deploy:
       resources:
         limits:

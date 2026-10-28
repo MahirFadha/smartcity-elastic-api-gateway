@@ -2,6 +2,7 @@ const http = require('http');
 
 const PORT = process.env.PORT || 3000;
 const SERVICE_NAME = process.env.SERVICE_NAME || 'Service Kependudukan';
+const WORKER_ID = process.env.WORKER_ID || 'Worker 1';
 const DELAY_MS = parseInt(process.env.ARTIFICIAL_DELAY_MS || '50', 10);
 
 // Sample mock data for Smart City citizen records
@@ -16,7 +17,7 @@ const server = http.createServer((req, res) => {
   // CORS & JSON Headers
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('X-Served-By', SERVICE_NAME);
+  res.setHeader('X-Served-By', `${SERVICE_NAME} - ${WORKER_ID}`);
 
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
@@ -26,6 +27,7 @@ const server = http.createServer((req, res) => {
     return res.end(JSON.stringify({
       status: "UP",
       service: SERVICE_NAME,
+      worker_id: WORKER_ID,
       timestamp: new Date().toISOString()
     }));
   }
@@ -39,6 +41,7 @@ const server = http.createServer((req, res) => {
         status: "success",
         code: 200,
         service: SERVICE_NAME,
+        worker_id: WORKER_ID,
         artificial_delay_ms: DELAY_MS,
         timestamp: new Date().toISOString(),
         total_records: mockCitizens.length,

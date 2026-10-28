@@ -30,7 +30,9 @@ upstreams:
           http_statuses: [500, 502, 503, 504]
           timeouts: 1
     targets:
-      - target: service-kependudukan:3000
+      - target: service-kependudukan-1:3000
+        weight: 100
+      - target: service-kependudukan-2:3000
         weight: 100
 
   - name: pajak-upstream
@@ -59,7 +61,9 @@ upstreams:
           http_statuses: [500, 502, 503, 504]
           timeouts: 1
     targets:
-      - target: service-pajak:3000
+      - target: service-pajak-1:3000
+        weight: 100
+      - target: service-pajak-2:3000
         weight: 100
 
 # ==============================================================================
