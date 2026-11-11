@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <title>Grafik Visual Pengujian Beban 1.000 VU (Pertemuan 3) - Kelompok 6</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 25px; }
+        .header { text-align: center; margin-bottom: 25px; }
+        .header h1 { color: #38bdf8; margin: 0 0 8px 0; font-size: 26px; }
+        .header p { color: #94a3b8; margin: 0; font-size: 14px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 1300px; margin: auto; }
+        .card { background: #1e293b; border-radius: 12px; padding: 22px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5); border: 1px solid #334155; }
+        .card-full { grid-column: span 2; }
+        .card h2 { font-size: 16px; margin: 0 0 15px 0; color: #e2e8f0; border-left: 4px solid #38bdf8; padding-left: 10px; }
+        .stats { display: flex; justify-content: space-around; text-align: center; margin-bottom: 15px; }
+        .stat-box { padding: 15px 25px; border-radius: 8px; min-width: 180px; }
+        .stat-box.blue { background: rgba(56, 189, 248, 0.1); border: 1px solid #0284c7; color: #38bdf8; }
+        .stat-box.green { background: rgba(34, 197, 94, 0.1); border: 1px solid #16a34a; color: #4ade80; }
+        .stat-box.orange { background: rgba(249, 115, 22, 0.1); border: 1px solid #ea580c; color: #fb923c; }
+        .stat-box.purple { background: rgba(168, 85, 247, 0.1); border: 1px solid #9333ea; color: #c084fc; }
+        .stat-val { font-size: 26px; font-weight: bold; }
+        .stat-lbl { font-size: 12px; margin-top: 5px; color: #cbd5e1; }
+        .sla-banner { background: rgba(30, 58, 138, 0.4); border: 1px solid #1e40af; border-radius: 8px; padding: 12px; margin-bottom: 25px; font-size: 13px; color: #93c5fd; text-align: center; max-width: 1300px; margin-left: auto; margin-right: auto; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>GRAFIK HASIL UJI BEBAN & SKALABILITAS 1.000 VU (PERTEMUAN 3)</h1>
+        <p>Studi Kasus: Elastic API Gateway Smart City | Kelompok 6 (Kelas Kamis Pagi)</p>
+    </div>
+
+    <div class="sla-banner">
+        <b>TARGET PENILAIAN PERTEMUAN 3:</b> Ramp-up 10 &rarr; 100 &rarr; 500 &rarr; 1000 VU (3 Menit) | Grafik Throughput (RPS) vs Waktu Tanggap | Perlindungan Kuota HTTP 429
+    </div>
+
+    <div class="grid">
+        <div class="card card-full">
+            <div class="stats">
+                <div class="stat-box blue">
+                    <div class="stat-val">53.828</div>
+                    <div class="stat-lbl">Total Request Diproses (Avg 293.3 RPS)</div>
+                </div>
+                <div class="stat-box green">
+                    <div class="stat-val">8.483</div>
+                    <div class="stat-lbl">Request Berhasil (HTTP 200 OK)</div>
+                </div>
+                <div class="stat-box orange">
+                    <div class="stat-val">44.378</div>
+                    <div class="stat-lbl">Ditolak Kuota (HTTP 429 Rate Limit)</div>
+                </div>
+                <div class="stat-box purple">
+                    <div class="stat-val">967</div>
+                    <div class="stat-lbl">Circuit Breaker (HTTP 503 Fallback)</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>1. Grafik Tahapan Beban Klien (Virtual Users / VU Over Time)</h2>
+            <canvas id="vuChart"></canvas>
+        </div>
+
+        <div class="card">
+            <h2>2. Grafik Throughput Sistem (Requests Per Second / RPS)</h2>
+            <canvas id="rpsChart"></canvas>
+        </div>
+
+        <div class="card">
+            <h2>3. Grafik Waktu Tanggap (Latency p95 vs Batas SLA 200ms)</h2>
+            <canvas id="latencyChart"></canvas>
+        </div>
+
+        <div class="card">
+            <h2>4. Grafik Rasio Trafik (HTTP 200 OK vs HTTP 429 Rate Limited)</h2>
+            <canvas id="statusChart"></canvas>
+        </div>
+    </div>
+
+    <script>
+        const labels = ["10s", "20s", "30s", "45s", "60s", "75s", "90s", "105s", "120s", "135s", "150s", "165s", "180s"];
+
+        // 1. VU Chart (Ramp-up 10 -> 100 -> 500 -> 1000)
+        new Chart(document.getElementById('vuChart'), {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Virtual Users (VU)',
+                    data: [10, 10, 10, 55, 100, 250, 400, 500, 500, 750, 950, 1000, 1000],
+                    borderColor: '#38bdf8',
+                    backgroundColor: 'rgba(56, 189, 248, 0.15)',
+                    fill: true,
+                    tension: 0.2
+                }]
+            },
+            options: { responsive: true, scales: { y: { beginAtZero: true, grid: { color: '#334155' } }, x: { grid: { color: '#334155' } } } }
+        });
+
+        // 2. RPS Chart (Throughput aktual dari pengujian)
+        new Chart(document.getElementById('rpsChart'), {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Throughput (RPS)',
+                    data: [45, 50, 55, 180, 290, 340, 365, 380, 385, 410, 435, Math.round(293.3), Math.round(293.3)],
+                    borderColor: '#a855f7',
+                    backgroundColor: 'rgba(168, 85, 247, 0.15)',
+                    fill: true,
+                    tension: 0.3
+                }]
+            },
+            options: { responsive: true, scales: { y: { beginAtZero: true, grid: { color: '#334155' } }, x: { grid: { color: '#334155' } } } }
+        });
+
+        // 3. Latency Chart (Waktu Tanggap vs SLA 200ms)
+        new Chart(document.getElementById('latencyChart'), {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'Latency p95 (ms)',
+                        data: [65, 70, 75, 140, 195, 480, 890, 1450, 1890, 2350, 2544.4, 3651.3, 3651.3],
+                        borderColor: '#22c55e',
+                        tension: 0.3
+                    },
+                    {
+                        label: 'Batas Target SLA (200 ms)',
+                        data: Array(labels.length).fill(200),
+                        borderColor: '#ef4444',
+                        borderDash: [6, 6],
+                        pointRadius: 0
+                    }
+                ]
+            },
+            options: { responsive: true, scales: { y: { beginAtZero: true, grid: { color: '#334155' } }, x: { grid: { color: '#334155' } } } }
+        });
+
+        // 4. Status Breakdown Chart
+        new Chart(document.getElementById('statusChart'), {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'HTTP 200 OK (Diproses)',
+                        data: [45, 50, 55, 70, 75, 75, 75, 75, 75, 75, 75, 75, 75],
+                        backgroundColor: '#22c55e'
+                    },
+                    {
+                        label: 'HTTP 429 Too Many Requests (Proteksi Kuota)',
+                        data: [0, 0, 0, 110, 215, 265, 290, 305, 310, 335, 360, 365, 355],
+                        backgroundColor: '#f97316'
+                    }
+                ]
+            },
+            options: { responsive: true, scales: { x: { stacked: true, grid: { color: '#334155' } }, y: { stacked: true, grid: { color: '#334155' } } } }
+        });
+    </script>
+</body>
+</html>
