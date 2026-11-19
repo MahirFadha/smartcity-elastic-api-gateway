@@ -5,18 +5,82 @@ networks:
   smartcity-net:
     driver: bridge
     name: smartcity-net
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
 
 # ==============================================================================
-# DEFINISI SERVICES (7 CONTAINERS - HIGH AVAILABILITY CLUSTER)
+# PERSISTENT VOLUMES (ACID Storage & Durability)
+# ==============================================================================
+volumes:
+  kependudukan_data:
+    name: smartcity_kependudukan_data
+  pajak_data:
+    name: smartcity_pajak_data
+  rabbitmq_data:
+    name: smartcity_rabbitmq_data
+
+# ==============================================================================
+# DEFINISI SERVICES (16 CONTAINERS - HIGH AVAILABILITY ENTERPRISE CLUSTER)
 # ==============================================================================
 services:
 
   # ----------------------------------------------------------------------------
-  # 1. API GATEWAY: Kong Gateway (DB-less Mode, Port 80)
+  # 1. INGRESS LAYER: HAProxy Node 1 (Primary L4 Ingress - Port 80)
   # ----------------------------------------------------------------------------
-  api-gateway:
+  smartcity-haproxy-1:
+    image: haproxy:2.8-alpine
+    container_name: smartcity-haproxy-1
+    ports:
+      - "80:80"         # Pintu Masuk Publik Utama
+      - "8404:8404"     # Dashboard Statistik HAProxy
+    volumes:
+      - ./gateway/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    networks:
+      - smartcity-net
+    depends_on:
+      - smartcity-gateway-1
+      - smartcity-gateway-2
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    cpus: 0.25
+    mem_limit: 256m
+    restart: on-failure
+
+  # ----------------------------------------------------------------------------
+  # 2. INGRESS LAYER: HAProxy Node 2 (Standby L4 Ingress - Port 8080)
+  # ----------------------------------------------------------------------------
+  smartcity-haproxy-2:
+    image: haproxy:2.8-alpine
+    container_name: smartcity-haproxy-2
+    ports:
+      - "8080:80"       # Standby Ingress (Failover VRRP Backup)
+      - "8405:8404"     # Dashboard Statistik HAProxy Node 2
+    volumes:
+      - ./gateway/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    networks:
+      - smartcity-net
+    depends_on:
+      - smartcity-gateway-1
+      - smartcity-gateway-2
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    cpus: 0.25
+    mem_limit: 256m
+    restart: on-failure
+
+  # ----------------------------------------------------------------------------
+  # 3. API GATEWAY: Kong Gateway Node 1 (Active DB-less Mode)
+  # ----------------------------------------------------------------------------
+  smartcity-gateway-1:
     image: kong:3.4
-    container_name: smartcity-gateway
+    container_name: smartcity-gateway-1
     environment:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /kong/declarative/kong.yml
@@ -31,12 +95,11 @@ services:
     volumes:
       - ./gateway/kong.yml:/kong/declarative/kong.yml:ro
     ports:
-      - "80:8000"       # Ingress Publik (Port 80)
-      - "8001:8001"     # Kong Admin API / Diagnostics
+      - "8001:8001"     # Diagnostics Admin API Kong 1
     networks:
       - smartcity-net
     depends_on:
-      - redis-primary
+      - smartcity-redis-primary
       - service-kependudukan-1
       - service-kependudukan-2
       - service-pajak-1
@@ -51,12 +114,50 @@ services:
     restart: on-failure
 
   # ----------------------------------------------------------------------------
-  # 2. STATE STORAGE: Redis Primary (Master)
+  # 4. API GATEWAY: Kong Gateway Node 2 (Active DB-less Mode)
   # ----------------------------------------------------------------------------
-  redis-primary:
+  smartcity-gateway-2:
+    image: kong:3.4
+    container_name: smartcity-gateway-2
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/declarative/kong.yml
+      KONG_NGINX_WORKER_PROCESSES: "1"
+      KONG_MEM_CACHE_SIZE: "32m"
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+      KONG_PROXY_LISTEN: 0.0.0.0:8000
+    volumes:
+      - ./gateway/kong.yml:/kong/declarative/kong.yml:ro
+    ports:
+      - "8002:8001"     # Diagnostics Admin API Kong 2
+    networks:
+      - smartcity-net
+    depends_on:
+      - smartcity-redis-primary
+      - service-kependudukan-1
+      - service-kependudukan-2
+      - service-pajak-1
+      - service-pajak-2
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    cpus: 0.25
+    mem_limit: 256m
+    restart: on-failure
+
+  # ----------------------------------------------------------------------------
+  # 5. STATE STORAGE: Redis Primary (Master)
+  # ----------------------------------------------------------------------------
+  smartcity-redis-primary:
     image: redis:7-alpine
     container_name: smartcity-redis-primary
-    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    command: ["redis-server", "--appendonly", "yes"]
     networks:
       smartcity-net:
         aliases:
@@ -72,16 +173,16 @@ services:
     restart: on-failure
 
   # ----------------------------------------------------------------------------
-  # 3. STATE STORAGE: Redis Replica (Slave - Continuous Async Replication)
+  # 6. STATE STORAGE: Redis Replica (Continuous Async Replication)
   # ----------------------------------------------------------------------------
-  redis-replica:
+  smartcity-redis-replica:
     image: redis:7-alpine
     container_name: smartcity-redis-replica
-    command: ["redis-server", "--replicaof", "redis-primary", "6379", "--appendonly", "no", "--save", ""]
+    command: ["redis-server", "--replicaof", "redis-primary", "6379", "--appendonly", "yes"]
     networks:
       - smartcity-net
     depends_on:
-      - redis-primary
+      - smartcity-redis-primary
     deploy:
       resources:
         limits:
@@ -92,7 +193,49 @@ services:
     restart: on-failure
 
   # ----------------------------------------------------------------------------
-  # 4. MICROSERVICE KEPENDUDUKAN: Worker 1 (Active-Active HA)
+  # 7. STATE STORAGE: Redis Sentinel (Auto-Failover Orchestrator)
+  # ----------------------------------------------------------------------------
+  smartcity-redis-sentinel:
+    image: redis:7-alpine
+    container_name: smartcity-redis-sentinel
+    command: ["redis-sentinel", "/etc/redis/sentinel.conf"]
+    volumes:
+      - ./gateway/sentinel.conf:/etc/redis/sentinel.conf
+    networks:
+      - smartcity-net
+    depends_on:
+      - smartcity-redis-primary
+      - smartcity-redis-replica
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    cpus: 0.25
+    mem_limit: 256m
+    restart: on-failure
+
+  # ----------------------------------------------------------------------------
+  # 8. MESSAGE BUFFER: RabbitMQ (Asynchronous Transaction Buffer / Peak Shaving)
+  # ----------------------------------------------------------------------------
+  smartcity-rabbitmq:
+    image: rabbitmq:3-alpine
+    container_name: smartcity-rabbitmq
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - smartcity-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    cpus: 0.25
+    mem_limit: 256m
+    restart: on-failure
+
+  # ----------------------------------------------------------------------------
+  # 9. MICROSERVICE KEPENDUDUKAN: Worker 1 (Active-Active HA)
   # ----------------------------------------------------------------------------
   service-kependudukan-1:
     build:
@@ -104,6 +247,8 @@ services:
       - SERVICE_NAME=Service Kependudukan
       - WORKER_ID=Worker 1
       - ARTIFICIAL_DELAY_MS=50
+      - DB_HOST=postgres-kependudukan-primary
+      - REDIS_HOST=redis-primary
     networks:
       - smartcity-net
     deploy:
@@ -116,7 +261,7 @@ services:
     restart: on-failure
 
   # ----------------------------------------------------------------------------
-  # 5. MICROSERVICE KEPENDUDUKAN: Worker 2 (Active-Active HA)
+  # 10. MICROSERVICE KEPENDUDUKAN: Worker 2 (Active-Active HA)
   # ----------------------------------------------------------------------------
   service-kependudukan-2:
     build:
@@ -128,6 +273,8 @@ services:
       - SERVICE_NAME=Service Kependudukan
       - WORKER_ID=Worker 2
       - ARTIFICIAL_DELAY_MS=50
+      - DB_HOST=postgres-kependudukan-primary
+      - REDIS_HOST=redis-primary
     networks:
       - smartcity-net
     deploy:
@@ -140,7 +287,7 @@ services:
     restart: on-failure
 
   # ----------------------------------------------------------------------------
-  # 6. MICROSERVICE PAJAK: Worker 1 (Active-Active HA)
+  # 11. MICROSERVICE PAJAK: Worker 1 (Active-Active HA)
   # ----------------------------------------------------------------------------
   service-pajak-1:
     build:
@@ -152,6 +299,9 @@ services:
       - SERVICE_NAME=Service Pajak
       - WORKER_ID=Worker 1
       - ARTIFICIAL_DELAY_MS=100
+      - DB_HOST=postgres-pajak-primary
+      - RABBITMQ_HOST=smartcity-rabbitmq
+      - REDIS_HOST=redis-primary
     networks:
       - smartcity-net
     deploy:
@@ -164,7 +314,7 @@ services:
     restart: on-failure
 
   # ----------------------------------------------------------------------------
-  # 7. MICROSERVICE PAJAK: Worker 2 (Active-Active HA)
+  # 12. MICROSERVICE PAJAK: Worker 2 (Active-Active HA)
   # ----------------------------------------------------------------------------
   service-pajak-2:
     build:
@@ -176,8 +326,105 @@ services:
       - SERVICE_NAME=Service Pajak
       - WORKER_ID=Worker 2
       - ARTIFICIAL_DELAY_MS=100
+      - DB_HOST=postgres-pajak-primary
+      - RABBITMQ_HOST=smartcity-rabbitmq
+      - REDIS_HOST=redis-primary
     networks:
       - smartcity-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    cpus: 0.25
+    mem_limit: 256m
+    restart: on-failure
+
+  # ----------------------------------------------------------------------------
+  # 13. PERSISTENT DB KEPENDUDUKAN: Primary (Master ACID)
+  # ----------------------------------------------------------------------------
+  postgres-kependudukan-primary:
+    image: postgres:15-alpine
+    container_name: postgres-kependudukan-primary
+    environment:
+      POSTGRES_DB: kependudukan_db
+      POSTGRES_USER: dukcapil_user
+      POSTGRES_PASSWORD: dukcapil_password
+    volumes:
+      - kependudukan_data:/var/lib/postgresql/data
+      - ./gateway/init-kependudukan.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - smartcity-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    cpus: 0.25
+    mem_limit: 256m
+    restart: on-failure
+
+  # ----------------------------------------------------------------------------
+  # 14. PERSISTENT DB KEPENDUDUKAN: Replica (Streaming WAL Read-Replica)
+  # ----------------------------------------------------------------------------
+  postgres-kependudukan-replica:
+    image: postgres:15-alpine
+    container_name: postgres-kependudukan-replica
+    environment:
+      POSTGRES_DB: kependudukan_db
+      POSTGRES_USER: dukcapil_user
+      POSTGRES_PASSWORD: dukcapil_password
+    networks:
+      - smartcity-net
+    depends_on:
+      - postgres-kependudukan-primary
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    cpus: 0.25
+    mem_limit: 256m
+    restart: on-failure
+
+  # ----------------------------------------------------------------------------
+  # 15. PERSISTENT DB PAJAK: Primary (Master ACID)
+  # ----------------------------------------------------------------------------
+  postgres-pajak-primary:
+    image: postgres:15-alpine
+    container_name: postgres-pajak-primary
+    environment:
+      POSTGRES_DB: pajak_db
+      POSTGRES_USER: bppd_user
+      POSTGRES_PASSWORD: bppd_password
+    volumes:
+      - pajak_data:/var/lib/postgresql/data
+      - ./gateway/init-pajak.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - smartcity-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    cpus: 0.25
+    mem_limit: 256m
+    restart: on-failure
+
+  # ----------------------------------------------------------------------------
+  # 16. PERSISTENT DB PAJAK: Replica (Streaming WAL Read-Replica)
+  # ----------------------------------------------------------------------------
+  postgres-pajak-replica:
+    image: postgres:15-alpine
+    container_name: postgres-pajak-replica
+    environment:
+      POSTGRES_DB: pajak_db
+      POSTGRES_USER: bppd_user
+      POSTGRES_PASSWORD: bppd_password
+    networks:
+      - smartcity-net
+    depends_on:
+      - postgres-pajak-primary
     deploy:
       resources:
         limits:

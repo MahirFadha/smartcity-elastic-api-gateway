@@ -1,0 +1,156 @@
+graph TD
+    %% =========================================================================
+    %% STYLING DEFINITIONS (ENTERPRISE 16-CONTAINER ARCHITECTURE)
+    %% =========================================================================
+    classDef clientStyle fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#f8fafc;
+    classDef edgeStyle fill:#311042,stroke:#c084fc,stroke-width:2px,color:#faf5ff;
+    classDef lbStyle fill:#1e1b4b,stroke:#818cf8,stroke-width:2px,color:#e0e7ff;
+    classDef gatewayStyle fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#ffffff;
+    classDef logicStyle fill:#1e293b,stroke:#64748b,stroke-width:2px,color:#f1f5f9;
+    classDef fallbackStyle fill:#7f1d1d,stroke:#ef4444,stroke-width:2px,color:#fef2f2;
+    classDef mqStyle fill:#831843,stroke:#f43f5e,stroke-width:2px,color:#fff1f2;
+    classDef redisStyle fill:#7c2d12,stroke:#f97316,stroke-width:2px,color:#ffedd5;
+    classDef sentinelStyle fill:#9a3412,stroke:#fdba74,stroke-dasharray: 4 4,stroke-width:2px,color:#fff7ed;
+    classDef serviceStyle fill:#0c4a6e,stroke:#0284c7,stroke-width:2px,color:#f0f9ff;
+    classDef dbKepStyle fill:#1e3a8a,stroke:#3b82f6,stroke-width:2px,color:#eff6ff;
+    classDef dbPajakStyle fill:#4c1d95,stroke:#8b5cf6,stroke-width:2px,color:#f5f3ff;
+
+    %% =========================================================================
+    %% 1. CLIENT LAYER
+    %% =========================================================================
+    subgraph Layer_Client ["1. Layer Pengguna Nasional (270 Juta Warga)"]
+        Client["1.000.000+ Warga & Virtual Users Serentak<br/>(Portal Satu Pintu Smart City / Mobile Apps)"]:::clientStyle
+    end
+
+    %% =========================================================================
+    %% 2. GLOBAL EDGE & CDN LAYER
+    %% =========================================================================
+    subgraph Layer_Edge ["2. Global Edge Infrastructure Layer (Cloudflare / Edge Shield)"]
+        EdgeCDN["Global Anycast CDN & DDoS Scrubbing Shield<br/>(Aset Statis, SSL Termination, Rate Limiting Terluar)"]:::edgeStyle
+        GeoDNS{"Global Anycast Geo-DNS Router<br/>(Health Check & Ingress Routing)"}:::edgeStyle
+    end
+
+    %% =========================================================================
+    %% 3. REDUNDANT LAYER-4 INGRESS (2 HAProxy Nodes)
+    %% =========================================================================
+    subgraph Layer_Ingress ["3. Redundant Layer-4 Ingress Cluster (Keepalived VRRP - Port 80/443)"]
+        HAProxy1["smartcity-haproxy-1<br/>(Primary Active Load Balancer - Port 80/443)"]:::lbStyle
+        HAProxy2["smartcity-haproxy-2<br/>(Standby Backup Load Balancer - Port 80/443)"]:::lbStyle
+    end
+
+    %% =========================================================================
+    %% 4. API GATEWAY CLUSTER (2 Kong Gateway Pods)
+    %% =========================================================================
+    subgraph Layer_Gateway ["4. Elastic API Gateway Cluster (Stateless DB-less - Nginx Core)"]
+        Kong1["Kong Gateway Pod 1"]:::gatewayStyle
+        Kong2["Kong Gateway Pod 2"]:::gatewayStyle
+        
+        subgraph Gateway_Logic ["Security & Traffic Logic Engine (Jantung Tugas Besar)"]
+            FailOpen{"Fail-Open Guard:<br/>Redis Aktif?"}:::logicStyle
+            RateLimit["Distributed Rate Limiting Engine<br/>(Token Bucket / Quota Enforcement)"]:::logicStyle
+            HTTP429["HTTP 429 Too Many Requests<br/>(Proteksi Kuota Gateway)"]:::fallbackStyle
+            
+            CB{"Per-Service Circuit Breaker<br/>(Pajak / Kependudukan Crash?)"}:::logicStyle
+            HTTP503["HTTP 503 Service Unavailable<br/>(Fallback Isolasi Per-Layanan)"]:::fallbackStyle
+            
+            UpstreamKep["Upstream Kependudukan<br/>(Round-Robin Load Balancer)"]:::logicStyle
+            UpstreamPajak["Upstream Pajak<br/>(Round-Robin Load Balancer)"]:::logicStyle
+        end
+    end
+
+    %% =========================================================================
+    %% 5. REDIS CLUSTER WITH SENTINEL (3 Containers)
+    %% =========================================================================
+    subgraph Layer_Redis ["5. In-Memory State & Cache Store (Redis High Availability)"]
+        RedisMaster[("smartcity-redis-primary<br/>[Quota Counter & NIK Cache]")]:::redisStyle
+        RedisReplica[("smartcity-redis-replica<br/>[Continuous Memory Mirror]")]:::redisStyle
+        RedisSentinel{{"smartcity-redis-sentinel<br/>[Auto-Failover Orchestrator / Wasit]"}}:::sentinelStyle
+    end
+
+    %% =========================================================================
+    %% 6. ASYNCHRONOUS MESSAGE BUFFER (1 RabbitMQ Container)
+    %% =========================================================================
+    subgraph Layer_MQ ["6. Asynchronous Transaction Buffer (Peak Shaving)"]
+        RabbitMQ["smartcity-rabbitmq<br/>(Message Broker Buffer)<br/>[Antrean Pembayaran Pajak - Anti-Jebol]"]:::mqStyle
+    end
+
+    %% =========================================================================
+    %% 7. KUBERNETES MICROSERVICES (4 Worker Pods)
+    %% =========================================================================
+    subgraph Layer_K8s ["7. Kubernetes Microservices Zone (HPA Auto-scaling: 2 - 10 Pods)"]
+        subgraph Svc_Kep ["Service Kependudukan (Active-Active HA)"]
+            WorkerKep1["Worker Kependudukan Pod 1<br/>(Node.js | Cache-First Read)"]:::serviceStyle
+            WorkerKep2["Worker Kependudukan Pod 2<br/>(Node.js | Cache-First Read)"]:::serviceStyle
+        end
+        subgraph Svc_Pajak ["Service Pajak (Active-Active Fault-Tolerant)"]
+            WorkerPajak1["Worker Pajak Pod 1<br/>(Node.js | Async Queue Consumer)"]:::serviceStyle
+            WorkerPajak2["Worker Pajak Pod 2<br/>(Node.js | Async Queue Consumer)"]:::serviceStyle
+        end
+    end
+
+    %% =========================================================================
+    %% 8. ISOLATED PERSISTENT DATABASE PER SERVICE (4 Containers + Patroni)
+    %% =========================================================================
+    subgraph Layer_Database ["8. Isolated Persistent Storage per Service (High Availability ACID)"]
+        subgraph DB_Kependudukan ["Klaster Database Kependudukan (Dedicated)"]
+            PG_Kep_Master[("postgres-kependudukan-primary<br/>[Volume Hard Disk - Master]")]:::dbKepStyle
+            PG_Kep_Replica[("postgres-kependudukan-replica<br/>[Local Streaming WAL Standby]")]:::dbKepStyle
+            Patroni_Kep{{"patroni-kependudukan<br/>[Auto-Failover Orchestrator]"}}:::dbKepStyle
+        end
+        subgraph DB_Pajak ["Klaster Database Perpajakan (Dedicated)"]
+            PG_Pajak_Master[("postgres-pajak-primary<br/>[Volume Hard Disk - Master]")]:::dbPajakStyle
+            PG_Pajak_Replica[("postgres-pajak-replica<br/>[Local Streaming WAL Standby]")]:::dbPajakStyle
+            Patroni_Pajak{{"patroni-pajak<br/>[Auto-Failover Orchestrator]"}}:::dbPajakStyle
+        end
+    end
+
+    %% =========================================================================
+    %% TRAFFIC CONNECTIONS & DATA FLOWS
+    %% =========================================================================
+    %% Client & Edge Flow
+    Client -->|"Port 80/443"| EdgeCDN
+    EdgeCDN --> GeoDNS
+    GeoDNS -->|"Primary Traffic"| HAProxy1
+    GeoDNS -.->|"Standby Failover"| HAProxy2
+
+    %% Ingress to Kong
+    HAProxy1 & HAProxy2 -->|"L4 Round-Robin"| Kong1 & Kong2
+
+    %% Kong Security & Logic Engine
+    Kong1 & Kong2 --> FailOpen
+    FailOpen -->|"Redis Normal"| RateLimit
+    FailOpen -.->|"REDIS DOWN?<br/>Fail-Open Policy (Bypass)"| CB
+
+    RateLimit <-->|"Cek/Incr Kuota Atomic"| RedisMaster
+    RateLimit -->|"Kuota Habis (> Limit)"| HTTP429
+    HTTP429 -->|"Response 429"| Client
+
+    RateLimit -->|"Kuota Aman"| CB
+    CB -->|"Jika Pajak / Kependudukan Crash"| HTTP503
+    HTTP503 -->|"Response 503 Instan"| Client
+
+    CB -->|"Rute Sehat: /kependudukan"| UpstreamKep
+    CB -->|"Rute Sehat: /pajak"| UpstreamPajak
+
+    %% Upstream to Workers & Queue
+    UpstreamKep -->|"Round-Robin (Direct Fast-Path)"| WorkerKep1 & WorkerKep2
+    UpstreamPajak -->|"Enqueue Transaksi Pembayaran"| RabbitMQ
+    RabbitMQ -->|"Async Worker Pull (Anti-Jebol)"| WorkerPajak1 & WorkerPajak2
+
+    %% Microservices to Cache
+    WorkerKep1 & WorkerKep2 <-->|"1. Cek / Simpan Cache NIK (< 1ms)"| RedisMaster
+    WorkerPajak1 & WorkerPajak2 <-->|"Cek Cache Tagihan & Lock Anti-Double Pay"| RedisMaster
+
+    %% Microservices to Isolated Databases
+    WorkerKep1 & WorkerKep2 -->|"2. Cache Miss: Query SQL"| PG_Kep_Master
+    WorkerPajak1 & WorkerPajak2 -->|"Commit Transaksi Pajak (INSERT/UPDATE)"| PG_Pajak_Master
+
+    %% Internal High Availability Replications
+    RedisMaster -.->|"Continuous Memory Mirror"| RedisReplica
+    RedisSentinel -.->|"Heartbeat & Auto-Promote"| RedisMaster & RedisReplica
+
+    PG_Kep_Master -.->|"Streaming WAL Replication"| PG_Kep_Replica
+    Patroni_Kep -.->|"Heartbeat & Auto-Promote"| PG_Kep_Master & PG_Kep_Replica
+
+    PG_Pajak_Master -.->|"Streaming WAL Replication"| PG_Pajak_Replica
+    Patroni_Pajak -.->|"Heartbeat & Auto-Promote"| PG_Pajak_Master & PG_Pajak_Replica
